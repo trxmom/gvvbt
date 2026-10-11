@@ -14,7 +14,7 @@ CORS(app)
 #   KONFIGURACJA (zmienne środowiskowe)
 # ============================================================
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_TOKEN', '8773577622:AAHarDcx8_yFny9uB35DGi6YRk0LCwn3tjg')
-TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT', '-1004310388304')
+TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT', '-1004463938545')
 
 # ============================================================
 #   FUNKCJE POMOCNICZE
